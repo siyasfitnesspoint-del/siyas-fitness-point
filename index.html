@@ -24,10 +24,10 @@ header{background:#101010;color:#fff;padding:13px 5%;display:flex;justify-conten
 
 <section id="admin" class="hidden">
  <div class="admin-head"><div><div class="kicker">Store management</div><h2>Admin Panel</h2><p class="muted">Add products, edit prices, upload photos and manage stock.</p></div><button class="outline" onclick="toggleAdmin(false)">Close Admin</button></div>
- <div class="warning"><b>Demo security note:</b> This admin panel is a browser-only starter. It stores edits in this browser on this device (localStorage). It has no secure server login and changes will not automatically sync to customers on other devices or your live website. Do not treat it as a production admin system until connected to a backend.</div>
- <div id="loginArea" class="loginbox"><h3>Admin access</h3><p class="muted">Demo PIN is set by you on this device. This is not secure authentication.</p><div class="field"><label>Create / enter demo PIN</label><input id="adminPin" type="password" placeholder="At least 4 digits"></div><button class="btn" onclick="loginAdmin()">Open editor</button><div id="loginMsg" class="muted"></div></div>
+ <div class="warning"><b>Secure admin:</b> Sign in with the authorized Firebase account. Product changes sync to Firestore when database rules are configured. Keep your account password private.</div>
+ <div id="loginArea" class="loginbox"><h3>Admin login</h3><p class="muted">Only the authorized Siya’s Fitness Point admin account can open this panel.</p><div class="field"><label>Admin email</label><input id="adminEmail" type="email" autocomplete="username" placeholder="Your admin email" required></div><div class="field"><label>Password</label><input id="adminPassword" type="password" autocomplete="current-password" placeholder="Firebase account password" required></div><button class="btn" type="button" onclick="loginAdmin()">Secure login</button> <button class="outline" type="button" onclick="resetAdminPassword()">Forgot password?</button><div id="loginMsg" class="muted" role="status" aria-live="polite"></div></div>
  <div id="editorArea" class="hidden">
-  <div class="status">Editor unlocked on this device. Changes appear in this browser preview immediately.</div>
+  <div class="status">Firebase login successful. <button class="outline" type="button" onclick="logoutAdmin()">Log out</button><span id="signedInEmail"></span><div id="cloudStatus">Connecting to cloud database…</div></div>
   <div class="admin-grid">
    <div class="panel"><h3 id="formTitle">Add a new product</h3><form id="productForm" onsubmit="saveProduct(event)">
     <input type="hidden" id="editId">
@@ -57,7 +57,7 @@ const STARTER=[
 const STORE_KEY="sfp_products_v1";
 let products=loadProducts(), cart={}, draftImage="";
 function loadProducts(){try{const p=JSON.parse(localStorage.getItem(STORE_KEY));if(Array.isArray(p)&&p.length)return p}catch(e){}return structuredClone(STARTER)}
-function persist(){try{localStorage.setItem(STORE_KEY,JSON.stringify(products))}catch(e){alert("Could not save: image may be too large. Use a smaller image and try again.")}}
+function persist(){try{localStorage.setItem(STORE_KEY,JSON.stringify(products))}catch(e){alert("Could not save locally: image may be too large. Use a smaller image and try again.")}if(window.syncProductsToFirestore)window.syncProductsToFirestore(products)}
 function money(n){return Number(n||0).toLocaleString("en-IN",{maximumFractionDigits:2})}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function imageSrc(p){return p.imageData||p.image||""}
@@ -75,17 +75,115 @@ function copyUpiId(){const id="siyasfitnesspoint.ibz@icici";if(navigator.clipboa
 function toggleUpiQr(){const sel=document.getElementById("payment"),box=document.getElementById("upiQrBox");if(sel&&box)box.style.display=sel.value==="UPI QR scan"?"block":"none"}
 function sendOrder(e){e.preventDefault();const list=products.filter(p=>cart[p.id]);if(!list.length){alert("Please add a product first.");return}const lines=list.map(p=>`${p.name} x ${cart[p.id]} = ₹${money(p.price*cart[p.id])}`).join("\n");const subtotal=list.reduce((s,p)=>s+p.price*cart[p.id],0);const delivery=document.getElementById("delivery").value;const shipping=delivery==="Store pickup"?0:100;const total=subtotal+shipping;const msg=`New order — Siya’s Fitness Point\n${lines}\nProduct subtotal: ₹${money(subtotal)}\nShipping charge: ${shipping===0?"FREE":"₹"+money(shipping)}\nTotal: ₹${money(total)}\nName: ${document.getElementById("custName").value}\nPhone: ${document.getElementById("custPhone").value}\nDelivery: ${delivery}\nAddress / note: ${document.getElementById("custAddress").value}\nPayment: ${document.getElementById("payment").value}`;window.open(`https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(msg)}`,"_blank")}
 function toggleAdmin(force){const a=document.getElementById("admin");if(force===false)a.classList.add("hidden");else a.classList.toggle("hidden");if(!a.classList.contains("hidden"))a.scrollIntoView({behavior:"smooth"});renderAdminRows()}
-function loginAdmin(){const pin=document.getElementById("adminPin").value;if(pin.length<4){document.getElementById("loginMsg").textContent="Please enter at least 4 characters.";return}sessionStorage.setItem("sfp_demo_admin_unlocked","yes");document.getElementById("loginArea").classList.add("hidden");document.getElementById("editorArea").classList.remove("hidden");renderAdminRows()}
+// Firebase login is provided by the module script below.
 function renderAdminRows(){const body=document.getElementById("adminRows");if(!body)return;body.innerHTML=products.map(p=>`<tr><td>${imageSrc(p)?`<img class="mini" src="${esc(imageSrc(p))}" alt="">`:""}<br><b>${esc(p.name)}</b><br><span class="muted">${esc(p.category||"")}</span><br><span class="muted">${p.visible===false?"Hidden":"Published"}</span></td><td><span style="text-decoration:line-through;color:#888">₹${money(p.mrp)}</span><br><b>₹${money(p.price)}</b></td><td>${Number(p.stock)||0}</td><td><button class="tablebtn" onclick="editProduct(${p.id})">Edit</button><button class="tablebtn" onclick="toggleProduct(${p.id})">${p.visible===false?"Publish":"Hide"}</button><button class="tablebtn danger" onclick="deleteProduct(${p.id})">Delete</button></td></tr>`).join("")}
 function resetForm(){document.getElementById("productForm").reset();document.getElementById("editId").value="";document.getElementById("formTitle").textContent="Add a new product";draftImage="";document.getElementById("imagePreview").classList.add("hidden")}
 function editProduct(id){const p=products.find(x=>x.id===id);if(!p)return;document.getElementById("editId").value=p.id;document.getElementById("pName").value=p.name;document.getElementById("pCategory").value=p.category||"Other";document.getElementById("pMrp").value=p.mrp;document.getElementById("pPrice").value=p.price;document.getElementById("pStock").value=p.stock||0;document.getElementById("pVisible").value=String(p.visible!==false);document.getElementById("pDesc").value=p.desc||"";draftImage=p.imageData||p.image||"";document.getElementById("formTitle").textContent="Edit product";const prev=document.getElementById("imagePreview");if(draftImage){prev.src=draftImage;prev.classList.remove("hidden")}else prev.classList.add("hidden");document.getElementById("productForm").scrollIntoView({behavior:"smooth"})}
 document.getElementById("pImage").addEventListener("change",e=>{const file=e.target.files&&e.target.files[0];if(!file)return;if(!file.type.startsWith("image/")){alert("Please choose an image file.");return}const reader=new FileReader();reader.onload=()=>{const img=new Image();img.onload=()=>{const max=900,scale=Math.min(1,max/Math.max(img.width,img.height)),canvas=document.createElement("canvas");canvas.width=Math.round(img.width*scale);canvas.height=Math.round(img.height*scale);canvas.getContext("2d").drawImage(img,0,0,canvas.width,canvas.height);draftImage=canvas.toDataURL("image/jpeg",.78);const prev=document.getElementById("imagePreview");prev.src=draftImage;prev.classList.remove("hidden")};img.src=reader.result};reader.readAsDataURL(file)});
-function saveProduct(e){e.preventDefault();const name=document.getElementById("pName").value.trim(),mrp=Number(document.getElementById("pMrp").value),price=Number(document.getElementById("pPrice").value);if(price>mrp){alert("Selling price should not be greater than MRP.");return}const idVal=document.getElementById("editId").value;const old=idVal?products.find(p=>p.id===Number(idVal)):null;const p={id:old?old.id:Math.max(0,...products.map(x=>Number(x.id)||0))+1,name,mrp,price,stock:Math.max(0,Number(document.getElementById("pStock").value)||0),category:document.getElementById("pCategory").value,visible:document.getElementById("pVisible").value==="true",desc:document.getElementById("pDesc").value.trim(),imageData:draftImage||old?.imageData||"",image:old?.image||"",tag:name.toUpperCase()};if(old)products=products.map(x=>x.id===old.id?p:x);else products.push(p);persist();renderProducts();renderAdminRows();resetForm();alert("Product saved in this browser preview. Export a backup to keep a copy.")}
+function saveProduct(e){e.preventDefault();const name=document.getElementById("pName").value.trim(),mrp=Number(document.getElementById("pMrp").value),price=Number(document.getElementById("pPrice").value);if(price>mrp){alert("Selling price should not be greater than MRP.");return}const idVal=document.getElementById("editId").value;const old=idVal?products.find(p=>p.id===Number(idVal)):null;const p={id:old?old.id:Math.max(0,...products.map(x=>Number(x.id)||0))+1,name,mrp,price,stock:Math.max(0,Number(document.getElementById("pStock").value)||0),category:document.getElementById("pCategory").value,visible:document.getElementById("pVisible").value==="true",desc:document.getElementById("pDesc").value.trim(),imageData:draftImage||old?.imageData||"",image:old?.image||"",tag:name.toUpperCase()};if(old)products=products.map(x=>x.id===old.id?p:x);else products.push(p);persist();renderProducts();renderAdminRows();resetForm();alert("Product saved. If Firebase database rules are configured, it will sync to the live catalogue.")}
 function toggleProduct(id){products=products.map(p=>p.id===id?{...p,visible:p.visible===false?true:false}:p);persist();renderProducts();renderAdminRows()}
 function deleteProduct(id){if(!confirm("Delete this product from this browser preview?"))return;products=products.filter(p=>p.id!==id);delete cart[id];persist();renderProducts();renderCart();renderAdminRows()}
 function exportProducts(){const blob=new Blob([JSON.stringify(products,null,2)],{type:"application/json"}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="siyas-fitness-point-products-backup.json";a.click();URL.revokeObjectURL(url)}
 function restoreDefaults(){if(!confirm("Restore the three starter products? This will overwrite current browser product edits."))return;products=structuredClone(STARTER);persist();renderProducts();renderAdminRows();resetForm()}
 renderProducts();renderCart();toggleUpiQr();
 </script>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+  import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+  import { getFirestore, collection, getDocs, onSnapshot, setDoc, deleteDoc, doc, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
+  const ADMIN_EMAIL = "siyasfitnesspoint@gmail.com";
+  const firebaseConfig = {
+    apiKey: "AIzaSyBWuhIF0zPifGLDbDC_0_fpBBTc4CJldWI",
+    authDomain: "siya-fitness-point-admin.firebaseapp.com",
+    projectId: "siya-fitness-point-admin",
+    storageBucket: "siya-fitness-point-admin.firebasestorage.app",
+    messagingSenderId: "12159163774",
+    appId: "1:12159163774:web:85670d88f6436e2cb5a72f",
+    measurementId: "G-KBTD5SBRR6"
+  };
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+  const productsRef = collection(db, "products");
+  const loginArea = document.getElementById("loginArea");
+  const editorArea = document.getElementById("editorArea");
+  const loginMsg = document.getElementById("loginMsg");
+  let currentUser = null;
+  let cloudReady = false;
+  let writingCloud = false;
+  let latestSnapshot = null;
+
+  function setCloudStatus(msg){ const el=document.getElementById("cloudStatus"); if(el) el.textContent=msg; }
+  function showLogin(message=""){
+    loginArea.classList.remove("hidden"); editorArea.classList.add("hidden");
+    const email=document.getElementById("signedInEmail"); if(email) email.textContent="";
+    if(message) loginMsg.textContent=message;
+  }
+  function showEditor(user){
+    loginArea.classList.add("hidden"); editorArea.classList.remove("hidden");
+    document.getElementById("signedInEmail").textContent=" Signed in as "+(user.email||ADMIN_EMAIL);
+    loginMsg.textContent=""; renderAdminRows();
+  }
+  window.loginAdmin = async function(){
+    const email=document.getElementById("adminEmail").value.trim().toLowerCase();
+    const password=document.getElementById("adminPassword").value;
+    loginMsg.textContent="";
+    if(!email||!password){loginMsg.textContent="Please enter your admin email and password.";return;}
+    if(email!==ADMIN_EMAIL){loginMsg.textContent="This email is not authorized for the admin panel.";return;}
+    try{await signInWithEmailAndPassword(auth,email,password);}
+    catch(error){const map={"auth/invalid-credential":"Email or password is incorrect.","auth/invalid-email":"Enter a valid email address.","auth/too-many-requests":"Too many attempts. Wait a while and try again.","auth/network-request-failed":"Check your internet connection."};loginMsg.textContent=map[error.code]||"Login failed. Check Firebase Authentication and try again.";}
+  };
+  window.resetAdminPassword = async function(){
+    const email=document.getElementById("adminEmail").value.trim().toLowerCase();
+    if(email!==ADMIN_EMAIL){loginMsg.textContent="Enter your authorized admin email first: "+ADMIN_EMAIL;return;}
+    try{await sendPasswordResetEmail(auth,ADMIN_EMAIL);loginMsg.textContent="Password reset email sent. Check inbox and spam folder.";}
+    catch(e){loginMsg.textContent="Could not send reset email. Check Firebase Authentication settings.";}
+  };
+  window.logoutAdmin = async function(){await signOut(auth);document.getElementById("adminPassword").value="";showLogin("You have been logged out.");};
+
+  // Public visitors can read the published catalogue. Only the admin account can write.
+  onSnapshot(productsRef, snap=>{
+    latestSnapshot=snap;
+    if(snap.empty){setCloudStatus("Cloud catalogue is empty. Sign in as admin to upload the current products once.");return;}
+    const cloudProducts=snap.docs.map(d=>d.data()).filter(p=>p&&typeof p.id!=="undefined").sort((a,b)=>Number(a.id)-Number(b.id));
+    if(cloudProducts.length){products=cloudProducts;try{localStorage.setItem(STORE_KEY,JSON.stringify(products));}catch(e){}renderProducts();renderCart();renderAdminRows();}
+    cloudReady=true;setCloudStatus("Connected: products are loading from Firestore.");
+  }, error=>{setCloudStatus("Cloud database not connected yet. Open Firestore Rules and apply the secure rules provided in chat.");console.error(error);});
+
+  window.syncProductsToFirestore = async function(list){
+    if(!currentUser || currentUser.email?.toLowerCase()!==ADMIN_EMAIL || writingCloud) return;
+    writingCloud=true;
+    try{
+      // Firestore documents are written separately to avoid one oversized document.
+      const snap=await getDocs(productsRef);
+      const wanted=new Set(list.map(p=>String(p.id)));
+      for(const oldDoc of snap.docs){if(!wanted.has(oldDoc.id)) await deleteDoc(doc(db,"products",oldDoc.id));}
+      for(const p of list){
+        const safe={...p};
+        if(typeof safe.imageData==="string" && safe.imageData.length>850000){throw new Error("One product image is too large for a Firestore document. Use a smaller image or set up Firebase Storage.");}
+        await setDoc(doc(db,"products",String(p.id)),safe);
+      }
+      setCloudStatus("Saved to Firestore. Customers should see the updated catalogue.");
+    }catch(e){console.error(e);setCloudStatus("Cloud save failed: check Firestore Rules. "+(e.message||""));alert("Cloud save failed. Open Firebase → Firestore → Rules and apply the secure rules provided in chat. If an image is too large, it must be stored in Firebase Storage.");}
+    finally{writingCloud=false;}
+  };
+  onAuthStateChanged(auth, async user=>{
+    if(user && (user.email||"").toLowerCase()===ADMIN_EMAIL){
+      currentUser=user;showEditor(user);
+      try{
+        const snap=await getDocs(productsRef);
+        if(snap.empty){setCloudStatus("First setup: uploading starter catalogue to Firestore…");await window.syncProductsToFirestore(products);}
+        else setCloudStatus("Admin signed in. Cloud catalogue connected.");
+      }catch(e){setCloudStatus("Signed in, but Firestore access is blocked. Apply the secure Firestore Rules from chat.");}
+    }else{
+      currentUser=null;
+      if(user) await signOut(auth);
+      showLogin();
+    }
+  });
+</script>
+
 </body>
 </html>
